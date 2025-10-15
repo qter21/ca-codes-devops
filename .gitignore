@@ -1,0 +1,28 @@
+# Environment files with actual credentials
+.env.production
+*.env
+
+# Backup files
+backup-*/
+*.backup
+*.tar.gz
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+temp/
+tmp/

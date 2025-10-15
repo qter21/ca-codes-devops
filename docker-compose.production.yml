@@ -1,0 +1,196 @@
+# California Codes Platform - Production Deployment
+# Unified docker-compose for all services on Google Cloud Compute Engine
+#
+# Services:
+# - codecond-ca: Next.js website (port 3456)
+# - legal-codes-api: FastAPI read-only API (port 8000)
+# - ca-fire-pipeline: Data pipeline (port 8001, manual start only)
+# - mongodb: MongoDB database (port 27017)
+# - redis: Redis cache (port 6379)
+#
+# Usage:
+#   Start all services:     docker-compose up -d
+#   Start with pipeline:    docker-compose --profile pipeline up -d
+#   Stop all services:      docker-compose down
+#   View logs:              docker-compose logs -f
+
+services:
+  # ============================================================================
+  # Frontend Website - Next.js
+  # ============================================================================
+  codecond-ca:
+    image: us-west2-docker.pkg.dev/project-anshari/codecond/codecond-ca:latest
+    container_name: codecond-ca
+    restart: unless-stopped
+    ports:
+      - "3456:3456"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_BASE_URL=/api
+      - API_BASE_URL=http://legal-codes-api:8000
+    depends_on:
+      - legal-codes-api
+    networks:
+      - ca-codes-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3456"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================================================
+  # Backend API - FastAPI (Read-Only)
+  # ============================================================================
+  legal-codes-api:
+    image: us-west2-docker.pkg.dev/project-anshari/codecond/legal-codes-api:latest
+    container_name: legal-codes-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # MongoDB Configuration
+      MONGODB_URI: mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@mongodb:27017/ca_codes_db?authSource=admin
+      MONGODB_DATABASE: ca_codes_db
+
+      # Redis Configuration
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+
+      # API Configuration
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RATE_LIMIT_DELAY: 0.1
+      API_KEY: ${API_KEY}
+      PYTHONUNBUFFERED: "1"
+      ENVIRONMENT: production
+
+      # External URLs (if API needs to fetch from leginfo)
+      API_BASE_URL: http://34.186.174.110:8000
+      LEGINFO_BASE_URL: https://leginfo.legislature.ca.gov/faces/
+      LEGINFO_CODES_DISPLAY_URL: https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml
+      LEGINFO_PRINT_URL: https://leginfo.legislature.ca.gov/faces/printCodeSectionWindow.xhtml
+      LEGINFO_SELECT_MULTIPLES_URL: https://leginfo.legislature.ca.gov/faces/selectFromMultiples.xhtml
+      LEGINFO_EXPAND_URL: https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml
+
+      # Processing Configuration
+      DEFAULT_RATE_LIMIT: 0.1
+      MAX_RETRIES: 5
+      REQUEST_TIMEOUT: 60
+      BATCH_SIZE: 20
+      USE_PLAYWRIGHT: "true"
+      ENABLE_CACHE: "true"
+      DEBUG_MODE: "false"
+    volumes:
+      - ./logs/api:/app/logs
+    networks:
+      - ca-codes-network
+    depends_on:
+      - mongodb
+      - redis
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ============================================================================
+  # Data Pipeline - Firecrawl-based CA Fire Pipeline (Manual Start Only)
+  # ============================================================================
+  ca-fire-pipeline:
+    image: us-west2-docker.pkg.dev/project-anshari/codecond/ca-fire-pipeline:latest
+    container_name: ca-fire-pipeline
+    restart: "no"  # Manual start only - don't auto-restart
+    ports:
+      - "8001:8001"
+    environment:
+      # Firecrawl Configuration
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY}
+      FIRECRAWL_BASE_URL: https://api.firecrawl.dev
+      FIRECRAWL_TIMEOUT: 60
+      FIRECRAWL_REQUEST_TIMEOUT: 90
+
+      # MongoDB Configuration
+      MONGODB_URI: mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@mongodb:27017/ca_codes_db?authSource=admin
+      MONGODB_DATABASE: ca_codes_db
+
+      # Pipeline Configuration
+      API_PORT: 8001
+      BATCH_SIZE: 50
+      MAX_CONCURRENT_REQUESTS: 5
+      CACHE_MAX_AGE: 172800000
+    volumes:
+      - ./logs/pipeline:/app/logs
+    networks:
+      - ca-codes-network
+    depends_on:
+      - mongodb
+    profiles:
+      - pipeline  # Only start when explicitly requested
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ============================================================================
+  # MongoDB Database - Persistent Storage
+  # ============================================================================
+  mongodb:
+    image: mongo:7.0
+    container_name: ca-codes-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_INITDB_DATABASE: ca_codes_db
+    volumes:
+      # IMPORTANT: Data persisted to /data/mongodb on host
+      - /data/mongodb:/data/db
+    networks:
+      - ca-codes-network
+    command: ["mongod", "--auth"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================================================
+  # Redis Cache - In-Memory Cache
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: ca-codes-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - ca-codes-network
+    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  ca-codes-network:
+    driver: bridge
+    name: ca-codes-network
+
+# ============================================================================
+# Volumes
+# ============================================================================
+volumes:
+  redis-data:
+    driver: local
