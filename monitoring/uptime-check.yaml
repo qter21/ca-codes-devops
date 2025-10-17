@@ -1,0 +1,14 @@
+displayName: "Danshari.ai Website HTTPS"
+monitoredResource:
+  type: "uptime_url"
+  labels:
+    project_id: "project-anshari"
+    host: "danshari.ai"
+httpCheck:
+  path: "/"
+  port: 443
+  useSsl: true
+  validateSsl: true
+  requestMethod: "GET"
+period: "300s"
+timeout: "10s"

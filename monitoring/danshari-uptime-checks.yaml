@@ -1,0 +1,263 @@
+# Uptime Checks for Danshari.ai
+# These monitor website and service availability from multiple global locations
+
+uptime_checks:
+  # Main Website Uptime Check
+  - displayName: "Danshari.ai Website (HTTPS)"
+    monitoredResource:
+      type: "uptime_url"
+      labels:
+        project_id: "project-anshari"
+        host: "danshari.ai"
+    httpCheck:
+      path: "/"
+      port: 443
+      useSsl: true
+      validateSsl: true
+      requestMethod: "GET"
+      acceptedResponseStatusCodes:
+        - statusClass: "STATUS_CLASS_2XX"
+        - statusValue: 200
+      headers:
+        "User-Agent": "Google-Cloud-Monitoring"
+    period: "60s"  # Check every minute
+    timeout: "10s"
+    contentMatchers:
+      - content: "danshari"  # Ensure page contains expected content
+        matcher: "CONTAINS_STRING"
+    checkerType: "STATIC_IP_CHECKERS"
+    selectedRegions:
+      - "USA"
+      - "EUROPE"
+      - "ASIA_PACIFIC"
+
+  # Direct IP Check (fallback)
+  - displayName: "Danshari.ai Direct IP Check"
+    monitoredResource:
+      type: "uptime_url"
+      labels:
+        project_id: "project-anshari"
+        host: "35.235.112.206"
+    httpCheck:
+      path: "/"
+      port: 443
+      useSsl: true
+      validateSsl: false  # Self-signed or no cert on IP
+      requestMethod: "GET"
+      acceptedResponseStatusCodes:
+        - statusClass: "STATUS_CLASS_2XX"
+        - statusClass: "STATUS_CLASS_3XX"
+    period: "300s"  # Check every 5 minutes
+    timeout: "10s"
+    checkerType: "STATIC_IP_CHECKERS"
+    selectedRegions:
+      - "USA"
+
+  # HTTP to HTTPS Redirect Check
+  - displayName: "Danshari.ai HTTP Redirect"
+    monitoredResource:
+      type: "uptime_url"
+      labels:
+        project_id: "project-anshari"
+        host: "danshari.ai"
+    httpCheck:
+      path: "/"
+      port: 80
+      useSsl: false
+      requestMethod: "GET"
+      acceptedResponseStatusCodes:
+        - statusClass: "STATUS_CLASS_3XX"  # Should redirect to HTTPS
+        - statusValue: 301
+        - statusValue: 302
+    period: "300s"
+    timeout: "10s"
+    checkerType: "STATIC_IP_CHECKERS"
+    selectedRegions:
+      - "USA"
+
+  # Health Endpoint Check (if exists)
+  - displayName: "Danshari.ai Health Endpoint"
+    monitoredResource:
+      type: "uptime_url"
+      labels:
+        project_id: "project-anshari"
+        host: "danshari.ai"
+    httpCheck:
+      path: "/health"  # Update if different
+      port: 443
+      useSsl: true
+      validateSsl: true
+      requestMethod: "GET"
+      acceptedResponseStatusCodes:
+        - statusClass: "STATUS_CLASS_2XX"
+        - statusValue: 200
+      headers:
+        "User-Agent": "Google-Cloud-Monitoring"
+    period: "60s"
+    timeout: "10s"
+    contentMatchers:
+      - content: '{"status":"ok"}'  # Update based on actual response
+        matcher: "CONTAINS_STRING"
+    checkerType: "STATIC_IP_CHECKERS"
+    selectedRegions:
+      - "USA"
+      - "ASIA_PACIFIC"
+
+  # API Endpoint Check (if public)
+  - displayName: "Danshari.ai API Endpoint"
+    monitoredResource:
+      type: "uptime_url"
+      labels:
+        project_id: "project-anshari"
+        host: "danshari.ai"
+    httpCheck:
+      path: "/api/health"  # Update with actual API path
+      port: 443
+      useSsl: true
+      validateSsl: true
+      requestMethod: "GET"
+      acceptedResponseStatusCodes:
+        - statusClass: "STATUS_CLASS_2XX"
+      headers:
+        "User-Agent": "Google-Cloud-Monitoring"
+    period: "120s"  # Check every 2 minutes
+    timeout: "15s"
+    checkerType: "STATIC_IP_CHECKERS"
+    selectedRegions:
+      - "USA"
+
+# Uptime Alert Policies
+uptime_alerts:
+  - displayName: "Danshari.ai - Website Down"
+    documentation:
+      content: |
+        CRITICAL: Danshari.ai website is not responding!
+
+        Immediate Actions:
+        1. Check website: curl -I https://danshari.ai
+        2. Check VM status: gcloud compute instances describe danshari-v-25 --zone=us-west2-a
+        3. SSH to instance: gcloud compute ssh danshari-v-25 --zone=us-west2-a
+        4. Check containers: docker ps -a
+        5. Check caddy logs: docker logs caddy --tail 100
+        6. Check danshari logs: docker logs danshari-compose --tail 100
+
+        If VM is down:
+        - Start: gcloud compute instances start danshari-v-25 --zone=us-west2-a
+
+        If containers are down:
+        - Restart: docker restart caddy danshari-compose
+      mimeType: "text/markdown"
+    conditions:
+      - displayName: "Website Uptime Check Failed"
+        conditionThreshold:
+          filter: |
+            resource.type = "uptime_url"
+            metric.type = "monitoring.googleapis.com/uptime_check/check_passed"
+            metric.labels.check_id = "danshari-website-https"
+          comparison: "COMPARISON_GT"
+          thresholdValue: 1
+          duration: "120s"  # 2 minutes
+          aggregations:
+            - alignmentPeriod: "60s"
+              perSeriesAligner: "ALIGN_NEXT_OLDER"
+              crossSeriesReducer: "REDUCE_COUNT_FALSE"
+              groupByFields: ["resource.*"]
+          trigger:
+            count: 1
+    combiner: "OR"
+    enabled: true
+    severity: "CRITICAL"
+    alertStrategy:
+      autoClose: "1800s"
+
+  - displayName: "Danshari.ai - Slow Response Time"
+    documentation:
+      content: |
+        Website response time has exceeded 3 seconds.
+        This indicates performance issues.
+
+        Investigation:
+        1. Check CPU/Memory: docker stats --no-stream
+        2. Check logs for errors: docker logs danshari-compose --tail 100
+        3. Check database: docker exec -it redis-cache redis-cli ping
+        4. Check external services connectivity
+        5. Consider restarting containers if memory leak suspected
+      mimeType: "text/markdown"
+    conditions:
+      - displayName: "Response time > 3 seconds"
+        conditionThreshold:
+          filter: |
+            resource.type = "uptime_url"
+            metric.type = "monitoring.googleapis.com/uptime_check/request_latency"
+            metric.labels.check_id = "danshari-website-https"
+          comparison: "COMPARISON_GT"
+          thresholdValue: 3000  # 3000ms = 3 seconds
+          duration: "300s"  # 5 minutes
+          aggregations:
+            - alignmentPeriod: "60s"
+              perSeriesAligner: "ALIGN_MEAN"
+    enabled: true
+    severity: "WARNING"
+    alertStrategy:
+      autoClose: "1800s"
+
+  - displayName: "Danshari.ai - SSL Certificate Expiring"
+    documentation:
+      content: |
+        SSL certificate for danshari.ai is expiring soon!
+
+        Actions:
+        1. Check certificate: curl -vI https://danshari.ai 2>&1 | grep -A5 "expire"
+        2. Renew via Caddy (automatic renewal should work)
+        3. Check caddy config: docker exec caddy cat /etc/caddy/Caddyfile
+        4. Manual renewal if needed: docker exec caddy caddy reload
+        5. Verify renewal: curl -vI https://danshari.ai 2>&1 | grep "expire date"
+      mimeType: "text/markdown"
+    conditions:
+      - displayName: "SSL cert expires in < 30 days"
+        conditionThreshold:
+          filter: |
+            resource.type = "uptime_url"
+            metric.type = "monitoring.googleapis.com/uptime_check/time_until_ssl_cert_expires"
+            metric.labels.check_id = "danshari-website-https"
+          comparison: "COMPARISON_LT"
+          thresholdValue: 2592000  # 30 days in seconds
+          duration: "600s"
+          aggregations:
+            - alignmentPeriod: "60s"
+              perSeriesAligner: "ALIGN_MIN"
+    enabled: true
+    severity: "WARNING"
+    alertStrategy:
+      autoClose: "86400s"  # 24 hours
+
+# Regional Availability Monitoring
+regional_availability:
+  - displayName: "Danshari.ai - Regional Availability"
+    documentation:
+      content: |
+        Website is failing from multiple geographic regions.
+        This may indicate DNS issues or global connectivity problems.
+
+        Investigation:
+        1. Check DNS: nslookup danshari.ai
+        2. Check from multiple locations: https://www.uptrends.com/tools/uptime
+        3. Check GCP network status: https://status.cloud.google.com/
+        4. Verify firewall rules: gcloud compute firewall-rules list
+        5. Check caddy proxy configuration
+      mimeType: "text/markdown"
+    conditions:
+      - displayName: "Failed checks in multiple regions"
+        conditionThreshold:
+          filter: |
+            resource.type = "uptime_url"
+            metric.type = "monitoring.googleapis.com/uptime_check/check_passed"
+            metric.labels.check_id = "danshari-website-https"
+          comparison: "COMPARISON_LT"
+          thresholdValue: 0.7  # Less than 70% success rate
+          duration: "300s"
+          aggregations:
+            - alignmentPeriod: "60s"
+              perSeriesAligner: "ALIGN_FRACTION_TRUE"
+    enabled: true
+    severity: "CRITICAL"

@@ -1,0 +1,269 @@
+# Alert Policies for Danshari.ai
+# Deploy with: ./deploy-monitoring.sh
+
+alerts:
+  # HIGH PRIORITY ALERTS
+
+  - displayName: "Danshari - High CPU Usage (>85%)"
+    documentation:
+      content: |
+        CPU usage has exceeded 85% on danshari-v-25.
+
+        Troubleshooting:
+        1. SSH: gcloud compute ssh danshari-v-25 --zone=us-west2-a
+        2. Check: docker stats
+        3. Check logs: docker logs danshari-compose --tail 100
+        4. Check processes: top -bn1 | head -20
+      mimeType: "text/markdown"
+    conditions:
+      - displayName: "CPU > 85%"
+        conditionThreshold:
+          filter: |
+            resource.type = "gce_instance"
+            resource.labels.instance_id = "danshari-v-25"
+            metric.type = "compute.googleapis.com/instance/cpu/utilization"
+          comparison: "COMPARISON_GT"
+          thresholdValue: 0.85
+          duration: "300s"  # 5 minutes
+          aggregations:
+            - alignmentPeriod: "60s"
+              perSeriesAligner: "ALIGN_MEAN"
+    alertStrategy:
+      autoClose: "1800s"  # 30 minutes
+    enabled: true
+    severity: "WARNING"
+
+  - displayName: "Danshari - Critical CPU Usage (>95%)"
+    documentation:
+      content: |
+        CRITICAL: CPU usage has exceeded 95% on danshari-v-25.
+        This may cause service degradation.
+
+        Immediate Actions:
+        1. Check container stats: docker stats --no-stream
+        2. Restart heavy container: docker restart danshari-compose
+        3. Consider upgrading to e2-standard-8 if persistent
+      mimeType: "text/markdown"
+    conditions:
+      - displayName: "CPU > 95%"
+        conditionThreshold:
+          filter: |
+            resource.type = "gce_instance"
+            resource.labels.instance_id = "danshari-v-25"
+            metric.type = "compute.googleapis.com/instance/cpu/utilization"
+          comparison: "COMPARISON_GT"
+          thresholdValue: 0.95
+          duration: "180s"  # 3 minutes
+          aggregations:
+            - alignmentPeriod: "60s"
+              perSeriesAligner: "ALIGN_MEAN"
+    alertStrategy:
+      autoClose: "1800s"
+    enabled: true
+    severity: "CRITICAL"
+
+  - displayName: "Danshari - High Memory Usage (>85%)"
+    documentation:
+      content: |
+        Memory usage has exceeded 85% on danshari-v-25 (16GB total).
+
+        Troubleshooting:
+        1. Check memory: free -h
+        2. Check containers: docker stats --no-stream
+        3. Check for memory leaks in danshari-compose
+        4. Consider restarting containers or upgrading instance
+      mimeType: "text/markdown"
+    conditions:
+      - displayName: "Memory > 85%"
+        conditionThreshold:
+          filter: |
+            resource.type = "gce_instance"
+            resource.labels.instance_id = "danshari-v-25"
+            metric.type = "agent.googleapis.com/memory/percent_used"
+            metric.labels.state = "used"
+          comparison: "COMPARISON_GT"
+          thresholdValue: 85
+          duration: "300s"
+          aggregations:
+            - alignmentPeriod: "60s"
+              perSeriesAligner: "ALIGN_MEAN"
+    alertStrategy:
+      autoClose: "1800s"
+    enabled: true
+    severity: "WARNING"
+
+  - displayName: "Danshari - Disk Usage >80%"
+    documentation:
+      content: |
+        Disk usage has exceeded 80% on danshari-v-25 (250GB disk).
+
+        Cleanup Actions:
+        1. Check usage: df -h
+        2. Clean Docker: docker system prune -a --volumes
+        3. Check logs: du -sh /var/log/* | sort -h
+        4. Consider expanding disk or cleaning old data
+      mimeType: "text/markdown"
+    conditions:
+      - displayName: "Disk > 80%"
+        conditionThreshold:
+          filter: |
+            resource.type = "gce_instance"
+            resource.labels.instance_id = "danshari-v-25"
+            metric.type = "agent.googleapis.com/disk/percent_used"
+            metric.labels.device =~ "^/dev/sda.*"
+            metric.labels.state = "used"
+          comparison: "COMPARISON_GT"
+          thresholdValue: 80
+          duration: "600s"  # 10 minutes
+          aggregations:
+            - alignmentPeriod: "60s"
+              perSeriesAligner: "ALIGN_MEAN"
+              crossSeriesReducer: "REDUCE_MAX"
+              groupByFields: ["resource.instance_id"]
+    alertStrategy:
+      autoClose: "3600s"
+    enabled: true
+    severity: "WARNING"
+
+  - displayName: "Danshari - VM Instance Down"
+    documentation:
+      content: |
+        CRITICAL: danshari-v-25 instance is not running!
+
+        Immediate Actions:
+        1. Check status: gcloud compute instances describe danshari-v-25 --zone=us-west2-a
+        2. Start instance: gcloud compute instances start danshari-v-25 --zone=us-west2-a
+        3. Check logs after start: gcloud compute ssh danshari-v-25 --zone=us-west2-a --command="docker ps"
+        4. Verify website: curl -I https://danshari.ai
+      mimeType: "text/markdown"
+    conditions:
+      - displayName: "Instance Status != RUNNING"
+        conditionThreshold:
+          filter: |
+            resource.type = "gce_instance"
+            resource.labels.instance_id = "danshari-v-25"
+            metric.type = "compute.googleapis.com/instance/uptime"
+          comparison: "COMPARISON_LT"
+          thresholdValue: 60
+          duration: "60s"
+          aggregations:
+            - alignmentPeriod: "60s"
+              perSeriesAligner: "ALIGN_MAX"
+    alertStrategy:
+      autoClose: "300s"
+    enabled: true
+    severity: "CRITICAL"
+
+  # MEDIUM PRIORITY ALERTS
+
+  - displayName: "Danshari - High Network Egress"
+    documentation:
+      content: |
+        Network egress has exceeded 100 MB/s on danshari-v-25.
+        This may indicate unusual traffic or potential DDoS.
+
+        Investigation:
+        1. Check active connections: netstat -an | grep ESTABLISHED | wc -l
+        2. Check nginx/caddy logs: docker logs caddy --tail 200
+        3. Monitor traffic: sudo iftop -i eth0
+        4. Check for attacks in GCP Security Command Center
+      mimeType: "text/markdown"
+    conditions:
+      - displayName: "Network Egress > 100 MB/s"
+        conditionThreshold:
+          filter: |
+            resource.type = "gce_instance"
+            resource.labels.instance_id = "danshari-v-25"
+            metric.type = "compute.googleapis.com/instance/network/sent_bytes_count"
+          comparison: "COMPARISON_GT"
+          thresholdValue: 104857600  # 100 MB/s
+          duration: "300s"
+          aggregations:
+            - alignmentPeriod: "60s"
+              perSeriesAligner: "ALIGN_RATE"
+    alertStrategy:
+      autoClose: "1800s"
+    enabled: true
+    severity: "WARNING"
+
+  - displayName: "Danshari - Container Unhealthy"
+    documentation:
+      content: |
+        One or more Docker containers on danshari-v-25 may be unhealthy.
+
+        Investigation:
+        1. Check all containers: docker ps -a
+        2. Check specific health: docker inspect danshari-compose | grep -A5 Health
+        3. View logs: docker logs danshari-compose --tail 100
+        4. Restart if needed: docker restart danshari-compose
+      mimeType: "text/markdown"
+    conditions:
+      - displayName: "Container restarts detected"
+        conditionThreshold:
+          filter: |
+            resource.type = "gce_instance"
+            resource.labels.instance_id = "danshari-v-25"
+            metric.type = "logging.googleapis.com/user/container_restarts"
+          comparison: "COMPARISON_GT"
+          thresholdValue: 3
+          duration: "300s"
+          aggregations:
+            - alignmentPeriod: "60s"
+              perSeriesAligner: "ALIGN_RATE"
+    alertStrategy:
+      autoClose: "1800s"
+    enabled: true
+    severity: "WARNING"
+
+  # LOW PRIORITY / INFORMATIONAL
+
+  - displayName: "Danshari - Disk Usage >70% (Info)"
+    documentation:
+      content: |
+        Disk usage has exceeded 70% on danshari-v-25.
+        Not critical yet, but plan for cleanup soon.
+
+        Recommended Actions:
+        1. Review disk usage: df -h
+        2. Schedule cleanup during low traffic period
+        3. Consider disk expansion if trend continues
+      mimeType: "text/markdown"
+    conditions:
+      - displayName: "Disk > 70%"
+        conditionThreshold:
+          filter: |
+            resource.type = "gce_instance"
+            resource.labels.instance_id = "danshari-v-25"
+            metric.type = "agent.googleapis.com/disk/percent_used"
+            metric.labels.device =~ "^/dev/sda.*"
+            metric.labels.state = "used"
+          comparison: "COMPARISON_GT"
+          thresholdValue: 70
+          duration: "1800s"  # 30 minutes
+          aggregations:
+            - alignmentPeriod: "60s"
+              perSeriesAligner: "ALIGN_MEAN"
+              crossSeriesReducer: "REDUCE_MAX"
+              groupByFields: ["resource.instance_id"]
+    alertStrategy:
+      autoClose: "7200s"  # 2 hours
+    enabled: true
+    severity: "INFO"
+
+# Notification Channels Configuration
+# You'll need to create these separately or configure in the deployment script
+notification_channels:
+  - type: "email"
+    displayName: "Danshari Alerts Email"
+    description: "Primary email for danshari.ai alerts"
+    labels:
+      email_address: "danny.dx.xie@gmail.com"  # Update with actual email
+    enabled: true
+
+  - type: "slack"  # Optional
+    displayName: "Danshari Alerts Slack"
+    description: "Slack channel for danshari.ai alerts"
+    labels:
+      channel_name: "#danshari-alerts"
+      url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"  # Update with actual webhook
+    enabled: false  # Enable after configuring webhook
