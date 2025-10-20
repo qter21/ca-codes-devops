@@ -27,6 +27,9 @@ Deploys the platform to Google Cloud Compute Engine instance.
 | `docker-compose.production.yml` | Unified docker-compose for all 5 services |
 | `build-and-push.sh` | Build images locally (Mac ARM64 → AMD64) and push to Artifact Registry |
 | `deploy.sh` | Deploy to GCloud instance `codecond` |
+| `data-sync/` | **Data sync scripts and documentation** |
+| `data-sync/sync-from-gcloud.sh` | Sync data from Google Cloud to local machine |
+| `data-sync/restore-local.sh` | Restore and run MongoDB locally with synced data |
 | `.env.production.example` | Environment variables template |
 | `DEPLOYMENT_UPGRADE.md` | Complete deployment guide with troubleshooting |
 
@@ -152,6 +155,46 @@ All files are deployed to `/home/daniel/ca-codes-platform/` on the instance:
 
 MongoDB data is persisted to `/data/mongodb/` on the host.
 
+## Data Sync & Backup
+
+### Sync Production Data to Local
+
+Download MongoDB data and configuration from production to your local machine:
+
+```bash
+# Navigate to data-sync folder
+cd data-sync/
+
+# Sync everything (MongoDB + config)
+./sync-from-gcloud.sh --all
+
+# Or just MongoDB data
+./sync-from-gcloud.sh --mongodb
+
+# List available backups in Cloud Storage
+./sync-from-gcloud.sh --list-backups
+```
+
+### Restore Data Locally
+
+Run MongoDB locally with production data:
+
+```bash
+# From data-sync folder
+cd data-sync/
+
+# Restore and start MongoDB
+./restore-local.sh --backup ~/gcloud-sync/mongodb-*/mongodb-backup-*.tar.gz
+
+# Check status
+./restore-local.sh --status
+
+# Connect to local MongoDB
+mongosh mongodb://admin:legalcodes123@localhost:27017
+```
+
+**See [data-sync/SYNC_GUIDE.md](data-sync/SYNC_GUIDE.md) for complete data sync documentation.**
+
 ## Common Tasks
 
 ### View Logs
@@ -246,6 +289,7 @@ docker-compose up -d
 
 ## Documentation
 
+- **[data-sync/SYNC_GUIDE.md](data-sync/SYNC_GUIDE.md)** - **Complete guide for syncing data from Google Cloud to local**
 - **[DEPLOYMENT_UPGRADE.md](DEPLOYMENT_UPGRADE.md)** - Complete deployment guide with troubleshooting
 - **[PRODUCTION_CONFIG.md](PRODUCTION_CONFIG.md)** - **Production credentials and configuration reference**
 - **[docker-compose.production.yml](docker-compose.production.yml)** - Service configuration
