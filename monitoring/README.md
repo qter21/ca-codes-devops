@@ -23,6 +23,25 @@ Comprehensive monitoring setup for the danshari.ai production environment on Goo
 
 ## Quick Start
 
+### Quick Status Check
+
+Use the status check script for a quick overview:
+
+```bash
+cd monitoring/
+./check-danshari-status.sh
+```
+
+This provides:
+- Instance status and resources
+- Website availability and response time
+- Container status and resource usage
+- Quick troubleshooting links
+
+### Performance Issues?
+
+If experiencing slow response times, see **[PERFORMANCE_TROUBLESHOOTING.md](PERFORMANCE_TROUBLESHOOTING.md)** for detailed troubleshooting guide and recent fixes.
+
 ### Deploy Monitoring (Recommended)
 
 Deploy all monitoring components with one command:
@@ -306,11 +325,37 @@ docker restart caddy danshari-compose
 
 ### Slow Response Time
 
-1. **Check CPU/Memory**: `docker stats --no-stream`
-2. **Check logs**: `docker logs danshari-compose --tail 100`
-3. **Test database**: `docker exec -it redis-cache redis-cli ping`
-4. **Check network**: `ping -c 5 google.com`
-5. **Restart containers if needed**: `docker restart danshari-compose redis-cache`
+⚠️ **See [PERFORMANCE_TROUBLESHOOTING.md](PERFORMANCE_TROUBLESHOOTING.md) for detailed troubleshooting guide**
+
+Quick checks:
+
+1. **Test application directly** (bypass Caddy):
+   ```bash
+   gcloud compute ssh danshari-v-25 --zone=us-west2-a \
+     --command="docker exec danshari-compose curl -s http://localhost:8080 -w 'Time: %{time_total}s\n'"
+   ```
+   - If fast (<0.01s): Problem is in Caddy
+   - If slow: Problem is in application
+
+2. **Check Caddy logs for errors**:
+   ```bash
+   docker logs caddy --tail 100 | grep -i error
+   ```
+
+3. **Test end-to-end performance**:
+   ```bash
+   for i in {1..10}; do
+     curl -o /dev/null -s -w "%{time_total}s\n" https://danshari.ai
+   done
+   ```
+
+4. **Check CPU/Memory**: `docker stats --no-stream`
+5. **Check logs**: `docker logs danshari-compose --tail 100`
+6. **Test database**: `docker exec -it redis-cache redis-cli ping`
+7. **Check network**: `ping -c 5 google.com`
+8. **Restart containers if needed**: `docker restart caddy danshari-compose redis-cache`
+
+**Recent Fix (Oct 2025):** Simplified Caddy configuration resolved 50% of requests experiencing 3-second delays. See PERFORMANCE_TROUBLESHOOTING.md for details.
 
 ## Maintenance Tasks
 
@@ -415,6 +460,15 @@ For issues or questions:
 
 ---
 
-**Last Updated**: 2025-10-17
+**Last Updated**: 2025-10-22
 **Maintained By**: DevOps Team
 **Instance**: danshari-v-25 (project-anshari)
+
+## Recent Updates
+
+### October 22, 2025
+- ✅ Fixed slow response time issue (3s delays)
+- ✅ Optimized Caddy reverse proxy configuration
+- ✅ Increased Uvicorn workers from 1 to 8
+- ✅ Added [PERFORMANCE_TROUBLESHOOTING.md](PERFORMANCE_TROUBLESHOOTING.md) guide
+- 📈 Response time improved from 3.3s to 0.289s average (10x improvement)
